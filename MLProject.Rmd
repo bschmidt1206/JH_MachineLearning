@@ -1,0 +1,135 @@
+---
+title: "Prediction of Exercise Movement using Accelerometer Data"
+date: "Monday, June 15, 2015"
+output: html_document
+---
+
+**Introduction**
+
+The goal of this analysis is to build a predictive model using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways.  The model predicts the manner in which the exercise was performed.
+
+For more information about this dataset, please see the following website and reference:
+
+http://groupware.les.inf.puc-rio.br/har
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+**Preparation of Dataset**
+
+The training dataset was downloaded from https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv into the local directory used for analysis.
+
+First we load required libraries and set the seed in order to ensure reproducibility.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+rm(list=ls())
+
+library(caret)
+library(randomForest)
+
+set.seed(8943)
+```
+
+Next we read the dataset, converting all potential predictors to numeric type (with blanks converted to NAs).
+
+The outcome (class) is the 'classe' column, which we make into a factor.
+
+```{r warning=FALSE, message=FALSE}
+ds = read.csv("pml-training.csv", stringsAsFactors = FALSE)
+
+for (i in 8:(ncol(ds) - 1))
+{
+  # Convert predictors to numeric (blanks as NAs)
+  if (!is.numeric(ds[, i]))  ds[, i] = as.numeric(ds[, i])
+}
+
+ds$classe = factor(ds$classe)
+```
+
+We split the dataset into training and test subsets, using 80% of the data for training.
+
+We remove columns not to be used for prediction, since they are not accelerometer readings.
+
+We also remove columns with near-zero variance.
+
+```{r}
+# Split dataset into training and testings sets
+training = createDataPartition(y = ds$classe, p = 0.80, list = FALSE)
+
+train = ds[training, ]
+test = ds[-training, ]
+
+# Columns not to be used for predictions
+do.not.use = c("X",
+               "user_name",
+               "raw_timestamp_part_1",
+               "raw_timestamp_part_2",
+               "cvtd_timestamp",
+               "new_window",
+               "num_window")
+
+# Don't use near-zero-variance columns for predictions either
+near.zero = nearZeroVar(train)
+
+ok = NULL
+for (i in 1:ncol(train))
+{
+  if (is.numeric(train[, i]))
+    if (!(colnames(train)[i] %in% c("classe", do.not.use, colnames(train)[near.zero])))
+      ok = c(colnames(train)[i], ok)
+}
+
+train.ok = train[, c("classe", ok)]
+test.ok = test[, c("classe", ok)]
+```
+
+We impute missing (NA) values using KNN.
+
+```{r}
+preObj = preProcess(train.ok[, -1], method="knnImpute")
+train = data.frame(classe=train.ok$classe, predict(preObj, train.ok[, -1]))
+test = data.frame(classe=test.ok$classe, predict(preObj, test.ok[, -1]))
+```
+
+**Analysis**
+
+We build a Random Forest model using the training subset.
+
+```{r}
+# Create random forest, and use for predictions on test set
+
+rf = randomForest(x=train[,-1], y=train$classe, importance = TRUE, ntree=200)
+pp = predict(rf, newdata = test[, -1])
+
+```
+
+The out of sample error is estimated by the Random Forest's OOB error rate.
+
+Random Forest OOB error rate:
+
+```{r echo=FALSE}
+(tail(rf$err.rate, 1)[1])
+```
+
+A better estimate of out of sample error is obtained using the 20% of the dataset that was not used to build the model.
+
+Test set error rate:
+
+```{r echo=FALSE}
+(1-mean(pp == test$classe))
+```
+
+Random Forest Error Rate Plot:
+
+```{r echo=FALSE}
+plot(rf)
+```
+
+Random Forest Variable Importance (Top 10) Plot
+
+```{r echo=FALSE}
+varImpPlot(rf, n.var = 10, main="Most Important Variables")
+```
+
+**Conclusion**
+
+Using the accelerometer dataset, it appears possible to predict the manner of movement with approximately 99% accuracy.  This model was developed using 80% of the dataset and tested on the remaining 20% to avoid overfitting.  Additional work could be done to zero in on the most important predictors, and attempt to build a model with similar performance but fewer predictors.
